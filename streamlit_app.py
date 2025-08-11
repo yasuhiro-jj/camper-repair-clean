@@ -2,14 +2,29 @@ import streamlit as st
 import os
 import uuid
 import re
-from typing import Literal
+
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.tools import tool
-from langgraph.graph import END, START, StateGraph, MessagesState
-from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
+
+from langchain_core.messages import BaseMessage
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
+
+# Windows互換性のため、個別にインポート
+try:
+    from langchain_community.document_loaders import PyPDFLoader, TextLoader
+except ModuleNotFoundError as e:
+    if "pwd" in str(e):
+        # pwdモジュールエラーの場合、代替手段を使用
+        import sys
+        import platform
+        if platform.system() == "Windows":
+            # Windows環境での代替インポート
+            from langchain_community.document_loaders.pdf import PyPDFLoader
+            from langchain_community.document_loaders.text import TextLoader
+        else:
+            raise e
+    else:
+        raise e
+
 import glob
 import config
 
@@ -42,208 +57,227 @@ def extract_blog_urls(documents, question=""):
     return list(urls)
 
 def extract_scenario_related_blogs(documents, question=""):
-    """シナリオファイルから関連ブログを抽出"""
+    """シナリオファイルから関連ブログを抽出（改善版）"""
     related_blogs = []
     
-    # 質問のキーワードを抽出
-    keywords = question.lower().split()
+    if not question:
+        return []
     
+    # 質問のキーワードを抽出
+    question_lower = question.lower()
+    
+    # 実際のファイルからURLを抽出
+    actual_urls = {}
     for doc in documents:
-        content = doc.page_content.lower()
+        content = doc.page_content
         source = doc.metadata.get('source', '')
         
-        # テキストファイル（シナリオ）の場合
-        if source.endswith('.txt'):
-            # キーワードに基づいて関連性を判定
-            relevance_score = 0
-            
-            # 冷蔵庫関連
-            if any(word in content for word in ['冷蔵庫', 'refrigerator', '冷蔵', '庫内', 'コンプレッサ']):
-                if any(word in question.lower() for word in ['冷蔵庫', '冷蔵', '冷えない', '冷凍']):
-                    relevance_score += 10
-            
-            # FFヒーター関連
-            if any(word in content for word in ['ffヒーター', 'ff', 'ヒーター', '暖房']):
-                if any(word in question.lower() for word in ['ff', 'ヒーター', '暖房', '暖かい']):
-                    relevance_score += 10
-            
-            # 雨漏り関連
-            if any(word in content for word in ['雨漏り', '雨', '漏水', '水漏れ']):
-                if any(word in question.lower() for word in ['雨漏り', '雨', '漏水', '水漏れ']):
-                    relevance_score += 10
-            
-            # バッテリー関連
-            if any(word in content for word in ['バッテリー', 'battery', '電源', '充電']):
-                if any(word in question.lower() for word in ['バッテリー', '電源', '充電', '上がり']):
-                    relevance_score += 10
-            
-            # 水道ポンプ関連
-            if any(word in content for word in ['水道ポンプ', '水', 'ポンプ', '給水']):
-                if any(word in question.lower() for word in ['水道', '水', 'ポンプ', '給水']):
-                    relevance_score += 10
-            
-            # ガスコンロ関連
-            if any(word in content for word in ['ガスコンロ', 'ガス', 'コンロ', '点火']):
-                if any(word in question.lower() for word in ['ガス', 'コンロ', '点火', '火']):
-                    relevance_score += 10
-            
-            # トイレ関連
-            if any(word in content for word in ['トイレ', 'toilet', '便器', '排水']):
-                if any(word in question.lower() for word in ['トイレ', '便器', '排水']):
-                    relevance_score += 10
-            
-            # ソーラーパネル関連
-            if any(word in content for word in ['ソーラーパネル', 'solar', '太陽光', '発電']):
-                if any(word in question.lower() for word in ['ソーラー', '太陽光', '発電']):
-                    relevance_score += 10
-            
-            # インバーター関連
-            if any(word in content for word in ['インバーター', 'inverter', '変換器', 'ac']):
-                if any(word in question.lower() for word in ['インバーター', '変換器', 'ac', '交流']):
-                    relevance_score += 10
-            
-            # 家具関連
-            if any(word in content for word in ['家具', 'テーブル', '椅子', 'ベッド']):
-                if any(word in question.lower() for word in ['家具', 'テーブル', '椅子', 'ベッド']):
-                    relevance_score += 10
-            
-            # 換気扇関連
-            if any(word in content for word in ['換気扇', 'vent', '換気', 'ファン']):
-                if any(word in question.lower() for word in ['換気扇', '換気', 'ファン']):
-                    relevance_score += 10
-            
-            # 窓関連
-            if any(word in content for word in ['窓', 'window', 'ガラス', 'サッシ']):
-                if any(word in question.lower() for word in ['窓', 'ガラス', 'サッシ']):
-                    relevance_score += 10
-            
-            # 車体外装関連
-            if any(word in content for word in ['車体', '外装', 'ボディ', '塗装']):
-                if any(word in question.lower() for word in ['車体', '外装', 'ボディ', '塗装']):
-                    relevance_score += 10
-            
-            # 異音関連
-            if any(word in content for word in ['異音', '音', '騒音', '振動']):
-                if any(word in question.lower() for word in ['異音', '音', '騒音', '振動']):
-                    relevance_score += 10
-            
-            # 関連性が高い場合、シナリオファイル名からブログ情報を生成
-            if relevance_score > 0:
-                # ファイル名からタイトルを抽出
-                filename = os.path.basename(source)
-                if '冷蔵庫' in filename:
-                    blog_info = {
-                        'title': '冷蔵庫の故障と修理方法',
-                        'url': 'https://camper-repair.net/refrigerator-repair',
-                        'category': '🧊 冷蔵庫',
-                        'relevance_score': relevance_score
-                    }
-                elif 'ff' in filename.lower() or 'ヒーター' in filename:
-                    blog_info = {
-                        'title': 'FFヒーターの故障と修理方法',
-                        'url': 'https://camper-repair.net/ff-heater-repair',
-                        'category': '🔥 FFヒーター',
-                        'relevance_score': relevance_score
-                    }
-                elif '雨漏り' in filename:
-                    blog_info = {
-                        'title': '雨漏りの対処法と修理',
-                        'url': 'https://camper-repair.net/rain-leak-repair',
-                        'category': '🌧️ 雨漏り',
-                        'relevance_score': relevance_score
-                    }
-                elif 'バッテリー' in filename:
-                    blog_info = {
-                        'title': 'バッテリーの故障と交換方法',
-                        'url': 'https://camper-repair.net/battery-repair',
-                        'category': '🔋 バッテリー',
-                        'relevance_score': relevance_score
-                    }
-                elif '水道' in filename or 'ポンプ' in filename:
-                    blog_info = {
-                        'title': '水道ポンプの修理方法',
-                        'url': 'https://camper-repair.net/water-pump-repair',
-                        'category': '🚰 水道ポンプ',
-                        'relevance_score': relevance_score
-                    }
-                elif 'ガス' in filename:
-                    blog_info = {
-                        'title': 'ガスコンロの点火トラブル対処',
-                        'url': 'https://camper-repair.net/gas-stove-repair',
-                        'category': '🔥 ガスコンロ',
-                        'relevance_score': relevance_score
-                    }
-                elif 'トイレ' in filename:
-                    blog_info = {
-                        'title': 'トイレの故障と修理方法',
-                        'url': 'https://camper-repair.net/toilet-repair',
-                        'category': '🚽 トイレ',
-                        'relevance_score': relevance_score
-                    }
-                elif 'ソーラー' in filename or 'solar' in filename.lower():
-                    blog_info = {
-                        'title': 'ソーラーパネルの設置と修理',
-                        'url': 'https://camper-repair.net/solar-panel-repair',
-                        'category': '☀️ ソーラーパネル',
-                        'relevance_score': relevance_score
-                    }
-                elif 'インバーター' in filename or 'inverter' in filename.lower():
-                    blog_info = {
-                        'title': 'インバーターの故障と修理',
-                        'url': 'https://camper-repair.net/inverter-repair',
-                        'category': '⚡ インバーター',
-                        'relevance_score': relevance_score
-                    }
-                elif '家具' in filename:
-                    blog_info = {
-                        'title': '家具の修理とメンテナンス',
-                        'url': 'https://camper-repair.net/furniture-repair',
-                        'category': '🪑 家具',
-                        'relevance_score': relevance_score
-                    }
-                elif '換気' in filename or 'ベント' in filename:
-                    blog_info = {
-                        'title': '換気扇の故障と修理',
-                        'url': 'https://camper-repair.net/vent-repair',
-                        'category': '💨 換気扇',
-                        'relevance_score': relevance_score
-                    }
-                elif '窓' in filename or 'window' in filename.lower():
-                    blog_info = {
-                        'title': '窓の修理と交換方法',
-                        'url': 'https://camper-repair.net/window-repair',
-                        'category': '🪟 窓',
-                        'relevance_score': relevance_score
-                    }
-                elif '車体' in filename or '外装' in filename:
-                    blog_info = {
-                        'title': '車体外装の修理方法',
-                        'url': 'https://camper-repair.net/exterior-repair',
-                        'category': '🚗 車体外装',
-                        'relevance_score': relevance_score
-                    }
-                elif '異音' in filename:
-                    blog_info = {
-                        'title': '異音の原因と対処法',
-                        'url': 'https://camper-repair.net/noise-repair',
-                        'category': '🔊 異音',
-                        'relevance_score': relevance_score
-                    }
-                else:
-                    # その他のシナリオファイル
-                    blog_info = {
-                        'title': f'{filename.replace(".txt", "").replace("シナリオ", "").strip()}の修理方法',
-                        'url': 'https://camper-repair.net/general-repair',
-                        'category': '🔧 修理全般',
-                        'relevance_score': relevance_score
-                    }
-                
-                related_blogs.append(blog_info)
+        # URLパターンを検索（https://camper-repair.net/で始まるURL）
+        url_pattern = r'https://camper-repair\.net/[^\s,、，。]+'
+        found_urls = re.findall(url_pattern, content)
+        
+        if found_urls:
+            # ファイル名からカテゴリを特定
+            filename = os.path.basename(source)
+            if '水道ポンプ' in filename:
+                actual_urls['水道ポンプ'] = found_urls[0]
+            elif '冷蔵庫' in filename:
+                actual_urls['冷蔵庫'] = found_urls[0]
+            elif 'ffヒーター' in filename.lower() or 'ffヒーター' in filename:
+                actual_urls['ffヒーター'] = found_urls[0]
+            elif '雨漏り' in filename:
+                actual_urls['雨漏り'] = found_urls[0]
+            elif 'バッテリー' in filename:
+                actual_urls['バッテリー'] = found_urls[0]
+            elif 'ガスコンロ' in filename:
+                actual_urls['ガスコンロ'] = found_urls[0]
+            elif 'トイレ' in filename:
+                actual_urls['トイレ'] = found_urls[0]
+            elif 'ソーラーパネル' in filename:
+                actual_urls['ソーラーパネル'] = found_urls[0]
+            elif 'インバーター' in filename:
+                actual_urls['インバーター'] = found_urls[0]
+            elif '電装系' in filename:
+                actual_urls['電装系'] = found_urls[0]
+            elif 'ルーフベント' in filename:
+                actual_urls['ルーフベント'] = found_urls[0]
+            elif '家具' in filename:
+                actual_urls['家具'] = found_urls[0]
+            elif '外部電源' in filename:
+                actual_urls['外部電源'] = found_urls[0]
+            elif '排水タンク' in filename:
+                actual_urls['排水タンク'] = found_urls[0]
+            elif 'ウインドウ' in filename:
+                actual_urls['ウインドウ'] = found_urls[0]
+            elif '車体外装' in filename:
+                actual_urls['車体外装'] = found_urls[0]
+            elif '異音' in filename:
+                actual_urls['異音'] = found_urls[0]
     
-    # 関連性スコアでソート（高い順）
-    related_blogs.sort(key=lambda x: x['relevance_score'], reverse=True)
+    # 正確なURLとタイトルのマッピング（実際のファイル内容に基づく）
+    keyword_mapping = {
+        '冷蔵庫': {
+            'keywords': ['冷蔵庫', '冷蔵', '冷凍', '冷えない', 'コンプレッサ'],
+            'url': actual_urls.get('冷蔵庫', 'https://camper-repair.net/refrigerator/'),
+            'title': '冷蔵庫トラブル知識ベース（キャンピングカー用・コンプレッサ式／3WAY共通）',
+            'category': '🧊 冷蔵庫'
+        },
+        'ffヒーター': {
+            'keywords': ['ffヒーター', 'ff', 'ヒーター', '暖房', '暖かい', '温風'],
+            'url': actual_urls.get('ffヒーター', 'https://camper-repair.net/ff-heater/'),
+            'title': 'FFヒーターの故障と修理方法',
+            'category': '🔥 FFヒーター'
+        },
+        '雨漏り': {
+            'keywords': ['雨漏り', '雨', '漏水', '水漏れ', '湿気', '防水'],
+            'url': actual_urls.get('雨漏り', 'https://camper-repair.net/rain-leak/'),
+            'title': '雨漏りの対処法と修理',
+            'category': '🌧️ 雨漏り'
+        },
+        'バッテリー': {
+            'keywords': ['バッテリー', 'battery', '電源', '充電', '上がり', '電圧'],
+            'url': actual_urls.get('バッテリー', 'https://camper-repair.net/battery/'),
+            'title': 'バッテリーの故障と修理方法',
+            'category': '🔋 バッテリー'
+        },
+        '水道ポンプ': {
+            'keywords': ['水道ポンプ', '水', 'ポンプ', '給水', '水圧', '蛇口'],
+            'url': actual_urls.get('水道ポンプ', 'https://camper-repair.net/water1/'),
+            'title': '水道ポンプの故障と修理方法',
+            'category': '💧 水道ポンプ'
+        },
+        'ガスコンロ': {
+            'keywords': ['ガスコンロ', 'ガス', 'コンロ', '点火', '火', '燃焼'],
+            'url': actual_urls.get('ガスコンロ', 'https://camper-repair.net/gas-stove/'),
+            'title': 'ガスコンロの故障と修理方法',
+            'category': '🔥 ガスコンロ'
+        },
+        'トイレ': {
+            'keywords': ['トイレ', 'toilet', '便器', '排水', '水洗', '臭い'],
+            'url': actual_urls.get('トイレ', 'https://camper-repair.net/toilet/'),
+            'title': 'トイレの故障と修理方法',
+            'category': '🚽 トイレ'
+        },
+        'ソーラーパネル': {
+            'keywords': ['ソーラーパネル', 'solar', '太陽光', '発電', '充電', 'パネル'],
+            'url': actual_urls.get('ソーラーパネル', 'https://camper-repair.net/solar-panel/'),
+            'title': 'ソーラーパネルの故障と修理方法',
+            'category': '☀️ ソーラーパネル'
+        },
+        'インバーター': {
+            'keywords': ['インバーター', 'inverter', '交流', '直流', '変換', '電圧'],
+            'url': actual_urls.get('インバーター', 'https://camper-repair.net/blog/inverter1/'),
+            'title': 'インバーター選定と設置方法',
+            'category': '⚡ インバーター'
+        },
+        '電装系': {
+            'keywords': ['電装', '配線', '電気', 'ショート', '断線', '電圧'],
+            'url': actual_urls.get('電装系', 'https://camper-repair.net/blog/electrical-solar-panel/'),
+            'title': 'キャンピングカー配線の基本と電装システム',
+            'category': '🔌 電装系'
+        },
+        'ルーフベント': {
+            'keywords': ['ルーフベント', '換気扇', '換気', '空気', '風通し'],
+            'url': actual_urls.get('ルーフベント', 'https://camper-repair.net/roof-vent/'),
+            'title': 'ルーフベント・換気扇の故障と修理方法',
+            'category': '💨 ルーフベント'
+        },
+        '家具': {
+            'keywords': ['家具', 'テーブル', '椅子', 'ベッド', '収納', '破損'],
+            'url': actual_urls.get('家具', 'https://camper-repair.net/furniture/'),
+            'title': '家具の故障と修理方法',
+            'category': '🪑 家具'
+        },
+        '外部電源': {
+            'keywords': ['外部電源', 'コンセント', 'ac', '交流', '充電'],
+            'url': actual_urls.get('外部電源', 'https://camper-repair.net/external-power/'),
+            'title': '外部電源の故障と修理方法',
+            'category': '🔌 外部電源'
+        },
+        '排水タンク': {
+            'keywords': ['排水タンク', '排水', 'タンク', '水', '配管', '詰まり'],
+            'url': actual_urls.get('排水タンク', 'https://camper-repair.net/drain-tank/'),
+            'title': '排水タンクの故障と修理方法',
+            'category': '🚰 排水タンク'
+        },
+        'ウインドウ': {
+            'keywords': ['ウインドウ', '窓', 'window', 'ガラス', '破損'],
+            'url': actual_urls.get('ウインドウ', 'https://camper-repair.net/window/'),
+            'title': 'ウインドウの故障と修理方法',
+            'category': '🪟 ウインドウ'
+        },
+        '車体外装': {
+            'keywords': ['車体', '外装', '破損', '傷', '塗装', '修理'],
+            'url': actual_urls.get('車体外装', 'https://camper-repair.net/exterior/'),
+            'title': '車体外装の故障と修理方法',
+            'category': '🚗 車体外装'
+        },
+        '異音': {
+            'keywords': ['異音', '音', '騒音', '振動', '故障', '異常'],
+            'url': actual_urls.get('異音', 'https://camper-repair.net/noise/'),
+            'title': '異音の原因と対処法',
+            'category': '🔊 異音'
+        }
+    }
     
-    return related_blogs
+    # 質問と各カテゴリの関連性を判定
+    matched_categories = []
+    
+    for category_name, category_info in keyword_mapping.items():
+        # キーワードマッチング
+        match_count = 0
+        for keyword in category_info['keywords']:
+            if keyword in question_lower:
+                match_count += 1
+        
+        # マッチしたカテゴリを記録
+        if match_count > 0:
+            matched_categories.append({
+                'name': category_name,
+                'info': category_info,
+                'score': match_count
+            })
+    
+    # スコアでソート（高い順）
+    matched_categories.sort(key=lambda x: x['score'], reverse=True)
+    
+    # 上位3件まで関連ブログを追加
+    for category in matched_categories[:3]:
+        blog_info = {
+            'title': category['info']['title'],
+            'url': category['info']['url'],
+            'category': category['info']['category'],
+            'relevance_score': category['score'],
+            'content_preview': f"{category['name']}に関する修理方法と対処法について詳しく解説しています。",
+            'source_file': 'シナリオファイル'
+        }
+        related_blogs.append(blog_info)
+    
+    # デフォルトブログを追加（関連ブログが少ない場合）
+    if len(related_blogs) < 2:
+        default_blogs = [
+            {
+                'title': 'キャンピングカー修理の基本',
+                'url': 'https://camper-repair.net/blog/repair1/',
+                'category': '🔧 基本修理',
+                'relevance_score': 5,
+                'content_preview': 'キャンピングカーの基本的な修理方法とメンテナンスについて詳しく解説しています。',
+                'source_file': '基本情報'
+            },
+            {
+                'title': '定期点検とメンテナンス',
+                'url': 'https://camper-repair.net/blog/risk1/',
+                'category': '📋 定期点検',
+                'relevance_score': 4,
+                'content_preview': 'キャンピングカーの定期点検項目とメンテナンススケジュールについて説明しています。',
+                'source_file': 'メンテナンス情報'
+            }
+        ]
+        related_blogs.extend(default_blogs)
+    
+    return related_blogs[:3]  # 最大3件まで返す
+
+
 
 def extract_title_from_url(url):
     """URLから適切なタイトルを抽出"""
@@ -397,24 +431,13 @@ def initialize_database():
 @st.cache_resource
 def initialize_model():
     """モデルを初期化"""
-    # APIキーを環境変数から取得
-    api_key = os.getenv("OPENAI_API_KEY")
+    # APIキーをconfigファイルから取得
+    api_key = config.OPENAI_API_KEY
     
-    # 環境変数が設定されていない場合の処理
+    # APIキーが設定されていない場合の処理
     if not api_key:
         st.error("⚠️ OpenAI APIキーが設定されていません。")
-        st.info("セキュリティのため、以下の方法でAPIキーを設定してください：")
-        st.markdown("""
-        **推奨方法（セキュリティ重視）**:
-        
-        1. **環境変数ファイル**: `env_example.txt`を参考に`.env`ファイルを作成
-        2. **システム環境変数**: Windowsの環境変数に`OPENAI_API_KEY`を追加
-           
-        **⚠️ セキュリティ注意事項**:
-        - APIキーをコード内に直接記述しないでください
-        - `.env`ファイルをGitにコミットしないでください
-        - APIキーを公開リポジトリにアップロードしないでください
-        """)
+        st.info("config.pyファイルにAPIキーを設定してください。")
         return None
     
     return ChatOpenAI(
@@ -424,11 +447,7 @@ def initialize_model():
         max_tokens=500  # トークン数を制限
     )
 
-@st.cache_resource
-def initialize_tools():
-    """ツールを初期化"""
-    # ツールを無効化して関連リンクを表示しない
-    return []
+
 
 # === RAGとプロンプトテンプレート ===
 def rag_retrieve(question: str, documents):
@@ -479,13 +498,13 @@ def rag_retrieve(question: str, documents):
         return "キャンピングカーの修理に関する一般的な情報をお探しします。"
 
 template = """
-あなたはキャンピングカーの修理専門家です。以下の文書抜粋を参照して質問に答えてください。
+あなたはキャンピングカーの修理専門家で、親しみやすく思いやりのあるキャラクターです。以下の文書抜粋を参照して質問に答えてください。
 
 文書抜粋：{document_snippet}
 
 質問：{question}
 
-以下の形式で親しみやすい会話調で回答してください。絶対にリンク、URL、検索結果、動画情報、商品情報、関連リンク、Google検索、YouTube動画、Amazon商品、🔗、🔍、📺、🛒、🏢、📖、📞、🔄、❓、💬、🔧、📋、🆕、🔋、🚰、🔥、🧊、🔧、🆕、【関連リンク】、【関連情報】、【詳細情報】、【参考リンク】、【外部リンク】、【検索結果】、【動画情報】、【商品情報】は含めないでください：
+以下の形式で、温かみがあり親しみやすい口調で回答してください。修理に困っている方への思いやりと励ましの気持ちを込めて、分かりやすく説明してください。絶対にリンク、URL、検索結果、動画情報、商品情報、関連リンク、Google検索、YouTube動画、Amazon商品、🔗、🔍、📺、🛒、🏢、📖、📞、🔄、❓、💬、🔧、📋、🆕、🔋、🚰、🔥、🧊、🔧、🆕、【関連リンク】、【関連情報】、【詳細情報】、【参考リンク】、【外部リンク】、【検索結果】、【動画情報】、【商品情報】は含めないでください：
 
 【対処法】
 • 具体的な手順
@@ -500,32 +519,7 @@ template = """
 def build_workflow():
     """ワークフローを構築"""
     model = initialize_model()
-    tools = initialize_tools()
-    tool_node = ToolNode(tools)
-    
-    def should_continue(state: MessagesState) -> Literal["tools", END]:
-        last_message = state["messages"][-1]
-        if last_message.tool_calls:
-            return "tools"
-        return END
-    
-    def call_model(state: MessagesState):
-        messages = state['messages']
-        try:
-            response = model.invoke(messages)
-            return {"messages": [response]}
-        except Exception as e:
-            error_message = f"申し訳ございませんが、エラーが発生しました: {str(e)}"
-            return {"messages": [AIMessage(content=error_message)]}
-    
-    workflow = StateGraph(MessagesState)
-    workflow.add_node("agent", call_model)
-    workflow.add_node("tools", tool_node)
-    workflow.add_edge(START, "agent")
-    workflow.add_conditional_edges("agent", should_continue)
-    workflow.add_edge("tools", 'agent')
-    checkpointer = MemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
+    return model
 
 # === ヘルパー関数 ===
 # 関連リンクの表示を無効化
@@ -545,9 +539,9 @@ def build_workflow():
 def generate_ai_response(prompt: str):
     """AI回答を生成する関数"""
     try:
-        # ドキュメントとワークフローを取得
+        # ドキュメントとモデルを取得
         documents = initialize_database()
-        app_flow = build_workflow()
+        model = build_workflow()
         
         # RAGで関連文書を取得
         document_snippet = rag_retrieve(prompt, documents)
@@ -565,22 +559,19 @@ def generate_ai_response(prompt: str):
                 history.append(AIMessage(content=msg["content"]))
         
         # 新しいメッセージを追加
-        inputs = history + [HumanMessage(content=content)]
-        thread = {"configurable": {"thread_id": st.session_state.conversation_id}}
+        messages = history + [HumanMessage(content=content)]
         
         # 回答を生成
-        response = ""
-        for event in app_flow.stream({"messages": inputs}, thread, stream_mode="values"):
-            if "messages" in event and event["messages"]:
-                response = event["messages"][-1].content
+        response = model.invoke(messages)
+        response_content = response.content
         
         # デバッグ用：元の回答を確認
-        print("Original response:", response)
+        print("Original response:", response_content)
         
         # 回答からリンクを除去して表示
         
         # すべてのURLを除去
-        clean_response = re.sub(r'https?://[^\s]+', '', response)
+        clean_response = re.sub(r'https?://[^\s]+', '', response_content)
         
         # すべてのMarkdownリンクを除去
         clean_response = re.sub(r'\[.*?\]\(.*?\)', '', clean_response)
@@ -646,7 +637,7 @@ def generate_ai_response(prompt: str):
         clean_response = clean_response.strip()
         
         # お問い合わせ案内を追加
-        contact_info = "\n\n---\n\n**💬 追加の質問**\n他に何かご質問ありましたら、引き続きチャットボットに聞いてみてください。\n\n**📞 お問い合わせ**\n直接スタッフにお尋ねをご希望の方は、[お問い合わせフォーム](https://camper-repair.net/contact/)またはお電話（086-206-6622）で受付けております。\n\n【営業時間】年中無休（9:00～21:00）\n※不在時は折り返しお電話差し上げます。"
+        contact_info = "\n\n---\n\n**💬 追加の質問**\n文章が途中で切れる場合がありますので、必要に応じてもう一度お聞きください。\n\n他に何かご質問ありましたら、引き続きチャットボットに聞いてみてください。\n\n**📞 お問い合わせ**\n直接スタッフにお尋ねをご希望の方は、[お問い合わせフォーム](https://camper-repair.net/contact/)またはお電話（086-206-6622）で受付けております。\n\n【営業時間】年中無休（9:00～21:00）\n※不在時は折り返しお電話差し上げます。\n\n**🔗 関連ブログ**\nより詳しい情報は[修理ブログ一覧](https://camper-repair.net/repair/)をご覧ください。"
         clean_response += contact_info
         
         # デバッグ用：フィルタリング後の回答を確認
@@ -661,61 +652,43 @@ def generate_ai_response(prompt: str):
         # シナリオファイルから関連ブログを抽出
         scenario_blogs = extract_scenario_related_blogs(documents, prompt)
         
-        # URLからも関連ブログを抽出
-        url_blogs = extract_blog_urls(documents, prompt)
-        
-        # 両方の結果を統合
-        all_blogs = []
-        
-        # シナリオ関連ブログを追加
-        for blog in scenario_blogs:
-            all_blogs.append({
-                'title': blog['title'],
-                'url': blog['url'],
-                'category': blog['category'],
-                'source': 'scenario'
-            })
-        
-        # URL関連ブログを追加
-        for url in url_blogs[:2]:  # URLは最大2件まで
-            title = extract_title_from_url(url)
-            category = ""
-            if "ff" in url.lower():
-                category = "🔥 FFヒーター"
-            elif "rain" in url.lower():
-                category = "🌧️ 雨漏り"
-            elif "inverter" in url.lower() or "electrical" in url.lower():
-                category = "⚡ 外部電源"
-            else:
-                category = "🔧 修理全般"
-            
-            all_blogs.append({
-                'title': title,
-                'url': url,
-                'category': category,
-                'source': 'url'
-            })
-        
-        if all_blogs:
-            # 上位3件の関連ブログを表示（関連性の高い順）
-            for i, blog in enumerate(all_blogs[:3]):
-                # ブログ記事をカード形式で表示（リンクとして機能）
+        if scenario_blogs:
+            # 関連ブログをシンプルなカード形式で表示
+            for i, blog in enumerate(scenario_blogs):
                 with st.container():
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        st.markdown(f"**{blog['category']}**")
-                    with col2:
-                        # 直接リンクとして表示
-                        st.markdown(f"[📖 {blog['title']}]({blog['url']})")
-                        st.caption(f"カテゴリ: {blog['category']}")
+                    st.markdown(f"""
+                    <div style="
+                        border: 1px solid #ddd;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 8px 0;
+                        background: #f9f9f9;
+                    ">
+                        <h4 style="margin: 8px 0; color: #2c3e50;">
+                            <a href="{blog['url']}" target="_blank" style="color: #007bff; text-decoration: none; font-weight: bold;">
+                                {blog['category']} - {blog['title']}
+                            </a>
+                        </h4>
+                        <p style="color: #555; font-size: 0.9em; margin: 8px 0;">
+                            {blog['content_preview']}
+                        </p>
+                        <div style="font-size: 0.8em; color: #007bff; margin-top: 8px;">
+                            <a href="{blog['url']}" target="_blank" style="color: #007bff; text-decoration: underline;">
+                                🌐 詳細を見る
+                            </a>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
         else:
-            st.info("関連するブログ記事が見つかりませんでした")
+            # 関連ブログが見つからない場合のシンプルな表示
+            st.info("💡 より具体的なキーワードで質問すると、関連記事が見つかりやすくなります")
+            st.markdown("**例：** 冷蔵庫が冷えない、FFヒーターの故障、雨漏りの修理、バッテリーの交換など")
         
         # 関連リンクの表示を無効化
         # display_related_links(prompt)
         
         # AIメッセージを履歴に追加
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.messages.append({"role": "assistant", "content": response_content})
         
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
