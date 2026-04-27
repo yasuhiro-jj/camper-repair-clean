@@ -26,7 +26,23 @@ except ModuleNotFoundError as e:
         raise e
 
 import glob
-import config
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+def get_openai_api_key():
+    """環境変数またはStreamlit SecretsからOpenAI APIキーを取得"""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        return api_key
+
+    try:
+        return st.secrets.get("OPENAI_API_KEY", "")
+    except Exception:
+        return ""
 
 # === ブログURL抽出関数 ===
 def extract_blog_urls(documents, question=""):
@@ -416,8 +432,12 @@ def initialize_database():
     
     if not documents:
         pdf_path = os.path.join(main_path, "キャンピングカー修理マニュアル.pdf")
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
+        if os.path.exists(pdf_path):
+            try:
+                loader = PyPDFLoader(pdf_path)
+                documents = loader.load()
+            except Exception:
+                documents = []
     
     # ドキュメントの内容を文字列に変換
     for doc in documents:
@@ -431,13 +451,13 @@ def initialize_database():
 @st.cache_resource
 def initialize_model():
     """モデルを初期化"""
-    # APIキーをconfigファイルから取得
-    api_key = config.OPENAI_API_KEY
+    # APIキーを環境変数またはStreamlit Secretsから取得
+    api_key = get_openai_api_key()
     
     # APIキーが設定されていない場合の処理
     if not api_key:
         st.error("⚠️ OpenAI APIキーが設定されていません。")
-        st.info("config.pyファイルにAPIキーを設定してください。")
+        st.info("OPENAI_API_KEYを環境変数またはStreamlit Secretsに設定してください。")
         return None
     
     return ChatOpenAI(
@@ -542,6 +562,8 @@ def generate_ai_response(prompt: str):
         # ドキュメントとモデルを取得
         documents = initialize_database()
         model = build_workflow()
+        if model is None:
+            return
         
         # RAGで関連文書を取得
         document_snippet = rag_retrieve(prompt, documents)
