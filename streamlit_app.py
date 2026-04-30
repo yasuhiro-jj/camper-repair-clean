@@ -418,7 +418,10 @@ def initialize_database():
     
     # テキストファイルを動的に検索
     txt_pattern = os.path.join(main_path, "*.txt")
-    txt_files = glob.glob(txt_pattern)
+    txt_files = [
+        txt_path for txt_path in glob.glob(txt_pattern)
+        if os.path.basename(txt_path).lower() != "requirements.txt"
+    ]
     
     for txt_path in txt_files:
         try:
