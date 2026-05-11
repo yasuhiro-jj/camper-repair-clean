@@ -78,8 +78,7 @@ class StreamlitAppConfigurationTests(unittest.TestCase):
     def test_get_openai_api_key_prefers_environment(self):
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "env-key"}, clear=True):
             app = import_app({"OPENAI_API_KEY": "secret-key"})
-
-        self.assertEqual(app.get_openai_api_key(), "env-key")
+            self.assertEqual(app.get_openai_api_key(), "env-key")
 
     def test_get_openai_api_key_uses_streamlit_secrets(self):
         with mock.patch.dict(os.environ, {}, clear=True):
