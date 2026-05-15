@@ -415,9 +415,8 @@ def initialize_database():
             pass
     
     if not documents:
-        pdf_path = os.path.join(main_path, "キャンピングカー修理マニュアル.pdf")
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
+        # 知識ファイルが同梱されていないデプロイでも、汎用修理アドバイスへフォールバックする
+        return []
     
     # ドキュメントの内容を文字列に変換
     for doc in documents:
