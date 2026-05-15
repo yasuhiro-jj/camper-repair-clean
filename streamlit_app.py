@@ -26,7 +26,7 @@ except ModuleNotFoundError as e:
         raise e
 
 import glob
-import config
+from app_config import get_openai_api_key
 
 # === ブログURL抽出関数 ===
 def extract_blog_urls(documents, question=""):
@@ -431,13 +431,13 @@ def initialize_database():
 @st.cache_resource
 def initialize_model():
     """モデルを初期化"""
-    # APIキーをconfigファイルから取得
-    api_key = config.OPENAI_API_KEY
+    # デプロイ環境ではconfig.pyが存在しないため、環境変数やStreamlit secretsも許可する
+    api_key = get_openai_api_key(secrets=st.secrets)
     
     # APIキーが設定されていない場合の処理
     if not api_key:
         st.error("⚠️ OpenAI APIキーが設定されていません。")
-        st.info("config.pyファイルにAPIキーを設定してください。")
+        st.info("OPENAI_API_KEYを環境変数、Streamlit secrets、またはconfig.pyに設定してください。")
         return None
     
     return ChatOpenAI(
