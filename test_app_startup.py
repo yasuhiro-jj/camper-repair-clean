@@ -105,8 +105,7 @@ class StreamlitAppStartupTests(unittest.TestCase):
     def test_openai_api_key_comes_from_environment(self):
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "env-key"}):
             app, _ = self.import_app()
-
-        self.assertEqual(app.get_openai_api_key(), "env-key")
+            self.assertEqual(app.get_openai_api_key(), "env-key")
 
     def test_openai_api_key_can_come_from_streamlit_secrets(self):
         fake_st = FakeStreamlit()
