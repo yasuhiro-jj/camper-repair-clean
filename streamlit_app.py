@@ -26,7 +26,17 @@ except ModuleNotFoundError as e:
         raise e
 
 import glob
-import config
+
+def get_openai_api_key():
+    """Return the OpenAI API key from deploy-safe configuration sources."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        return api_key
+
+    try:
+        return st.secrets.get("OPENAI_API_KEY", "")
+    except Exception:
+        return ""
 
 # === ブログURL抽出関数 ===
 def extract_blog_urls(documents, question=""):
@@ -415,9 +425,7 @@ def initialize_database():
             pass
     
     if not documents:
-        pdf_path = os.path.join(main_path, "キャンピングカー修理マニュアル.pdf")
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
+        return []
     
     # ドキュメントの内容を文字列に変換
     for doc in documents:
@@ -431,13 +439,13 @@ def initialize_database():
 @st.cache_resource
 def initialize_model():
     """モデルを初期化"""
-    # APIキーをconfigファイルから取得
-    api_key = config.OPENAI_API_KEY
+    # APIキーを環境変数またはStreamlit Secretsから取得
+    api_key = get_openai_api_key()
     
     # APIキーが設定されていない場合の処理
     if not api_key:
         st.error("⚠️ OpenAI APIキーが設定されていません。")
-        st.info("config.pyファイルにAPIキーを設定してください。")
+        st.info("OPENAI_API_KEYを環境変数またはStreamlit Secretsに設定してください。")
         return None
     
     return ChatOpenAI(
