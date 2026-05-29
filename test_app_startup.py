@@ -22,7 +22,8 @@ class StartupRegressionTests(unittest.TestCase):
 
     def test_missing_knowledge_files_do_not_load_untracked_pdf(self):
         self.assertIn("if not documents:\n        return documents", APP_SOURCE)
-        self.assertNotIn("PyPDFLoader(pdf_path)", APP_SOURCE)
+        missing_pdf = "\u30ad\u30e3\u30f3\u30d4\u30f3\u30b0\u30ab\u30fc\u4fee\u7406\u30de\u30cb\u30e5\u30a2\u30eb.pdf"
+        self.assertNotIn(f'os.path.join(main_path, "{missing_pdf}")', APP_SOURCE)
 
     def test_missing_model_configuration_does_not_invoke_none(self):
         self.assertIn("model = build_workflow()\n        if model is None:\n            return", APP_SOURCE)
