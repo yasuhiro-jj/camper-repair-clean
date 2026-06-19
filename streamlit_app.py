@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import uuid
 import re
+import importlib
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
@@ -26,7 +27,27 @@ except ModuleNotFoundError as e:
         raise e
 
 import glob
-import config
+
+
+def get_openai_api_key():
+    """OpenAI APIキーをデプロイ環境で利用できる場所から取得する。"""
+    env_key = os.environ.get("OPENAI_API_KEY")
+    if env_key:
+        return env_key
+
+    try:
+        secrets_key = st.secrets.get("OPENAI_API_KEY")
+    except Exception:
+        secrets_key = None
+    if secrets_key:
+        return secrets_key
+
+    try:
+        local_config = importlib.import_module("config")
+    except ModuleNotFoundError:
+        return None
+
+    return getattr(local_config, "OPENAI_API_KEY", None)
 
 # === ブログURL抽出関数 ===
 def extract_blog_urls(documents, question=""):
@@ -415,9 +436,7 @@ def initialize_database():
             pass
     
     if not documents:
-        pdf_path = os.path.join(main_path, "キャンピングカー修理マニュアル.pdf")
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
+        return []
     
     # ドキュメントの内容を文字列に変換
     for doc in documents:
@@ -431,8 +450,7 @@ def initialize_database():
 @st.cache_resource
 def initialize_model():
     """モデルを初期化"""
-    # APIキーをconfigファイルから取得
-    api_key = config.OPENAI_API_KEY
+    api_key = get_openai_api_key()
     
     # APIキーが設定されていない場合の処理
     if not api_key:
@@ -542,6 +560,14 @@ def generate_ai_response(prompt: str):
         # ドキュメントとモデルを取得
         documents = initialize_database()
         model = build_workflow()
+        if model is None:
+            setup_message = (
+                "OpenAI APIキーが設定されていないため、回答を生成できません。"
+                "管理者は OPENAI_API_KEY を環境変数または Streamlit Secrets に設定してください。"
+            )
+            st.warning(setup_message)
+            st.session_state.messages.append({"role": "assistant", "content": setup_message})
+            return
         
         # RAGで関連文書を取得
         document_snippet = rag_retrieve(prompt, documents)
